@@ -1,0 +1,980 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sistema Inventario Veracruz</title>
+
+<style>
+body{font-family:Arial;background:#f4f6f9;margin:0;padding:20px;}
+h1,h2{color:#d81d1d;}
+.panel{background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.1);max-width:1000px;margin:auto;margin-bottom:20px;}
+input,select,button{padding:10px;margin:5px;}
+#buscarProducto{min-width:280px;}
+.chat-inventario{display:grid;gap:10px;border:2px solid #d81d1d;}
+#chatMensajes{background:#f4f6f9;border:1px solid #ddd;border-radius:8px;min-height:120px;max-height:220px;overflow:auto;padding:10px;text-align:left;}
+.chat-msg{padding:8px;margin:6px 0;border-radius:6px;background:white;border:1px solid #e1e1e1;}
+.chat-user{border-left:4px solid #d81d1d;}
+.chat-ai{border-left:4px solid #1d72d8;}
+.chat-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+#ordenIA{flex:1;min-width:260px;}
+#confirmacionIA{background:#fff8e1;border:1px solid #e0c15a;border-radius:8px;padding:10px;display:none;}
+button{background:#d81d1d;color:white;border:none;border-radius:5px;cursor:pointer;}
+button:hover{background:#b91515;}
+table{width:100%;border-collapse:collapse;background:white;}
+th,td{border:1px solid #ddd;padding:10px;text-align:center;}
+th{background:#d81d1d;color:white;}
+#login{max-width:400px;margin:auto;margin-top:100px;}
+</style>
+</head>
+
+<body>
+
+<!-- LOGIN -->
+<div id="login" class="panel">
+<h2>Ingreso Sistema</h2>
+<input type="text" id="user" placeholder="Usuario"><br>
+<input type="password" id="pass" placeholder="Contraseña"><br>
+<button onclick="entrar()">Ingresar</button>
+</div>
+
+<!-- SISTEMA -->
+<div id="sistema" style="display:none;">
+
+<div class="panel">
+<h1>SISTEMA INVENTARIOS VERACRUZ</h1>
+<h3 id="bienvenida"></h3>
+
+<input type="text" id="buscarProducto" placeholder="Buscar producto por nombre, código o categoría">
+<select id="producto"></select>
+<input type="number" id="cantidad" placeholder="Cantidad">
+<button id="btnKardex" type="button">Ver Kardex</button>
+<button id="btnExcelKardex" type="button">Excel Kardex</button>
+<button onclick="entrada()">Entrada</button>
+<button onclick="salida()">Salida</button>
+<button onclick="exportarExcel()">Excel</button>
+<button onclick="salir()">Cerrar Sesión</button>
+</div>
+<div class="panel chat-inventario">
+<h2>Asistente de Inventario</h2>
+<div id="chatMensajes"></div>
+<div class="chat-actions">
+<input type="text" id="ordenIA" placeholder="Habla o escribe: agrega 5 aceites, cuanto stock hay, muestra kardex...">
+<button id="btnEnviarIA" type="button">Enviar</button>
+<button id="btnVozIA" type="button">Hablar</button><button id="btnModoSiri" type="button">Modo Siri</button><button id="btnDetenerSiri" type="button">Detener Voz</button>
+</div>
+<div id="confirmacionIA">
+<p id="textoConfirmacionIA"></p>
+<button id="btnConfirmarIA" type="button">Confirmar</button>
+<button id="btnCancelarIA" type="button">Cancelar</button>
+</div>
+</div>
+
+<table>
+<thead>
+<tr>
+<th>Categoría</th>
+<th>Código</th>
+<th>Producto</th>
+<th>Stock</th>
+</tr>
+</thead>
+<tbody id="tabla"></tbody>
+</table>
+
+<div class="panel" id="kardexPanel" style="display:none;">
+<h2>Kardex de Movimientos</h2>
+<p id="mensajeKardex" style="font-weight:bold;color:#d81d1d;"></p>
+<table>
+<thead>
+<tr>
+<th>Fecha</th>
+<th>Producto</th>
+<th>Tipo</th>
+<th>Entrada</th>
+<th>Salida</th>
+<th>Stock</th>
+<th>Usuario</th>
+</tr>
+</thead>
+<tbody id="tablaKardex"></tbody>
+</table>
+</div>
+
+</div>
+
+<!-- LIB EXCEL -->
+<script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+
+<script type="module">
+async function obtenerMovimientosKardex() {
+let select = document.getElementById("producto");
+let productoId = select.value;
+let productoNombre = select.options[select.selectedIndex]?.text || "";
+
+if (!productoId) {
+return {
+productoId,
+productoNombre,
+movimientos: [],
+error: "Primero selecciona un producto."
+};
+}
+
+const snapshot = await getDocs(collection(db, "movimientos"));
+let movimientos = [];
+
+snapshot.forEach(docSnap => {
+let movimiento = docSnap.data();
+
+if (movimiento.productoId === productoId || movimiento.producto === productoNombre) {
+movimientos.push(movimiento);
+}
+});
+
+movimientos.sort((a, b) => obtenerFecha(a.fecha) - obtenerFecha(b.fecha));
+
+return {
+productoId,
+productoNombre,
+movimientos,
+error: ""
+};
+}
+
+async function verKardex() {
+let tablaKardex = document.getElementById("tablaKardex");
+let kardexPanel = document.getElementById("kardexPanel");
+let mensajeKardex = document.getElementById("mensajeKardex");
+
+kardexPanel.style.display = "block";
+mensajeKardex.innerHTML = "Buscando movimientos del producto seleccionado...";
+kardexPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+tablaKardex.innerHTML = `
+<tr>
+<td colspan="7">Cargando movimientos...</td>
+</tr>
+`;
+
+try {
+let resultado = await obtenerMovimientosKardex();
+
+if (resultado.error) {
+mensajeKardex.innerHTML = resultado.error;
+tablaKardex.innerHTML = `
+<tr>
+<td colspan="7">${resultado.error}</td>
+</tr>
+`;
+return;
+}
+
+if (resultado.movimientos.length === 0) {
+mensajeKardex.innerHTML = "Sin movimientos para este producto.";
+tablaKardex.innerHTML = `
+<tr>
+<td colspan="7">No hay movimientos para ${resultado.productoNombre}.</td>
+</tr>
+`;
+return;
+}
+
+let stock = 0;
+let html = "";
+
+for (let m of resultado.movimientos) {
+let cantidad = Number(m.cantidad) || 0;
+
+if (m.tipo === "entrada") stock += cantidad;
+else if (m.tipo === "salida") stock -= cantidad;
+
+html += `
+<tr>
+<td>${formatearFecha(m.fecha)}</td>
+<td>${m.producto || resultado.productoNombre}</td>
+<td>${m.tipo || ""}</td>
+<td>${m.tipo === "entrada" ? cantidad : ""}</td>
+<td>${m.tipo === "salida" ? cantidad : ""}</td>
+<td>${stock}</td>
+<td>${m.usuario || ""}</td>
+</tr>
+`;
+}
+
+tablaKardex.innerHTML = html;
+mensajeKardex.innerHTML = "Kardex cargado correctamente.";
+
+} catch (error) {
+console.error("Error al cargar Kardex:", error);
+mensajeKardex.innerHTML = "Error al cargar Kardex.";
+tablaKardex.innerHTML = `
+<tr>
+<td colspan="7">No se pudo cargar el Kardex: ${error.message}</td>
+</tr>
+`;
+}
+}
+
+async function exportarKardexExcel() {
+let mensajeKardex = document.getElementById("mensajeKardex");
+
+try {
+mensajeKardex.innerHTML = "Preparando Excel del Kardex...";
+let resultado = await obtenerMovimientosKardex();
+
+if (resultado.error) {
+alert(resultado.error);
+mensajeKardex.innerHTML = resultado.error;
+return;
+}
+
+if (resultado.movimientos.length === 0) {
+alert("No hay movimientos para exportar de " + resultado.productoNombre + ".");
+mensajeKardex.innerHTML = "Sin movimientos para exportar.";
+return;
+}
+
+let stock = 0;
+let data = resultado.movimientos.map(m => {
+let cantidad = Number(m.cantidad) || 0;
+
+if (m.tipo === "entrada") stock += cantidad;
+else if (m.tipo === "salida") stock -= cantidad;
+
+return {
+Fecha: formatearFecha(m.fecha),
+Producto: m.producto || resultado.productoNombre,
+Tipo: m.tipo || "",
+Entrada: m.tipo === "entrada" ? cantidad : "",
+Salida: m.tipo === "salida" ? cantidad : "",
+Stock: stock,
+Usuario: m.usuario || ""
+};
+});
+
+const ws = XLSX.utils.json_to_sheet(data);
+const wb = XLSX.utils.book_new();
+
+XLSX.utils.book_append_sheet(wb, ws, "Kardex");
+XLSX.writeFile(wb, "Kardex_" + limpiarNombreArchivo(resultado.productoNombre) + ".xlsx");
+
+mensajeKardex.innerHTML = "Excel del Kardex generado correctamente.";
+
+} catch (error) {
+console.error("Error al exportar Kardex:", error);
+alert("No se pudo exportar el Kardex: " + error.message);
+mensajeKardex.innerHTML = "Error al exportar Kardex.";
+}
+}
+
+window.verKardex = verKardex;
+window.exportarKardexExcel = exportarKardexExcel;
+document.getElementById("btnKardex").addEventListener("click", verKardex);
+document.getElementById("btnExcelKardex").addEventListener("click", exportarKardexExcel);
+
+function obtenerFecha(fecha) {
+if (!fecha) return 0;
+if (typeof fecha.toMillis === "function") return fecha.toMillis();
+if (fecha.seconds) return fecha.seconds * 1000;
+return new Date(fecha).getTime() || 0;
+}
+
+function formatearFecha(fecha) {
+let milisegundos = obtenerFecha(fecha);
+if (!milisegundos) return "Sin fecha";
+return new Date(milisegundos).toLocaleString();
+}
+
+function limpiarNombreArchivo(nombre) {
+return (nombre || "Producto").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
+}
+
+/* ================= FIREBASE ================= */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+getFirestore,
+collection,
+addDoc,
+getDocs,
+updateDoc,
+doc,
+Timestamp
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const firebaseConfig = {
+apiKey: "AIzaSyAvOnFwBgQJIABHlOdK44TIriiL8E0SLw0",
+authDomain: "veracruz-3555d.firebaseapp.com",
+projectId: "veracruz-3555d",
+storageBucket: "veracruz-3555d.firebasestorage.app",
+messagingSenderId: "580995350218",
+appId: "1:580995350218:web:f7027cbd8f1fff5d857e33"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+/* ================= USUARIOS ================= */
+let usuarios = [
+{user:"kevin",pass:"1234",rol:"Admin"},
+{user:"ingelver",pass:"1234",rol:"Empleado"},
+{user:"ana",pass:"3333",rol:"Empleado"}
+];
+
+/* ================= LOGIN ================= */
+window.entrar = function(){
+
+let u = document.getElementById("user").value;
+let p = document.getElementById("pass").value;
+
+let acceso = usuarios.find(x => x.user == u && x.pass == p);
+
+if(!acceso){
+alert("Usuario incorrecto");
+return;
+}
+
+window.usuarioActual = acceso.user;
+window.rolActual = acceso.rol;
+
+document.getElementById("login").style.display = "none";
+document.getElementById("sistema").style.display = "block";
+
+document.getElementById("bienvenida").innerHTML =
+"Bienvenido " + acceso.user;
+
+mostrar();
+
+}
+
+/* ================= MOSTRAR INVENTARIO ================= */
+let inventarioProductos = [];
+
+async function mostrar(){
+
+const snap = await getDocs(collection(db,"inventario"));
+inventarioProductos = [];
+
+snap.forEach(d => {
+let item = d.data();
+inventarioProductos.push({
+id: d.id,
+categoria: item.categoria || "",
+codigo: item.codigo || "",
+producto: item.producto || "",
+stock: item.stock || 0
+});
+});
+
+renderizarInventario(document.getElementById("buscarProducto").value);
+
+}
+
+function renderizarInventario(busqueda){
+let tabla = document.getElementById("tabla");
+let select = document.getElementById("producto");
+let filtro = normalizarTexto(busqueda || "");
+
+let productosFiltrados = inventarioProductos.filter(item => coincideProducto(item, filtro));
+
+tabla.innerHTML = "";
+select.innerHTML = "";
+
+if (productosFiltrados.length === 0) {
+tabla.innerHTML = `
+<tr>
+<td colspan="4">No se encontraron productos parecidos.</td>
+</tr>
+`;
+select.innerHTML = `<option value="">Sin resultados</option>`;
+return;
+}
+
+productosFiltrados.forEach(item => {
+tabla.innerHTML += `
+<tr>
+<td>${item.categoria}</td>
+<td>${item.codigo}</td>
+<td>${item.producto}</td>
+<td>${item.stock}</td>
+</tr>
+`;
+
+select.innerHTML += `<option value="${item.id}">${item.producto}</option>`;
+});
+}
+
+function coincideProducto(item, filtro){
+
+if (!filtro) return true;
+
+let nombre = normalizarTexto(item.producto);
+let codigo = normalizarTexto(item.codigo);
+let categoria = normalizarTexto(item.categoria);
+
+let textoCompleto = `${nombre} ${codigo} ${categoria}`;
+
+if (textoCompleto.includes(filtro)) return true;
+
+let palabrasBusqueda = filtro.split(" ").filter(Boolean);
+let palabrasProducto = textoCompleto.split(" ").filter(Boolean);
+
+let coincidencias = 0;
+
+for(let busqueda of palabrasBusqueda){
+
+let encontrado = false;
+
+for(let palabra of palabrasProducto){
+
+if(palabra.includes(busqueda)){
+encontrado = true;
+break;
+}
+
+let distancia = distanciaLevenshtein(palabra, busqueda);
+
+let porcentaje =
+1 - (distancia / Math.max(palabra.length, busqueda.length));
+
+if(porcentaje >= 0.7){
+encontrado = true;
+break;
+}
+
+}
+
+if(encontrado){
+coincidencias++;
+}
+
+}
+
+return coincidencias >= Math.max(1, palabrasBusqueda.length - 1);
+
+}
+
+function normalizarTexto(texto){
+return String(texto || "")
+.toLowerCase()
+.normalize("NFD")
+.replace(/[\u0300-\u036f]/g, "")
+.replace(/[^a-z0-9\s]/g, " ")
+.replace(/\s+/g, " ")
+.trim();
+}
+
+function esParecido(texto, busqueda){
+
+if (!texto || !busqueda) return false;
+
+texto = normalizarTexto(texto);
+busqueda = normalizarTexto(busqueda);
+
+if (texto.includes(busqueda)) return true;
+
+let distancia = distanciaLevenshtein(texto, busqueda);
+
+let similitud =
+1 - (distancia / Math.max(texto.length, busqueda.length));
+
+return similitud >= 0.7;
+
+}
+
+function distanciaLevenshtein(a, b){
+let matriz = [];
+
+for (let i = 0; i <= b.length; i++) matriz[i] = [i];
+for (let j = 0; j <= a.length; j++) matriz[0][j] = j;
+
+for (let i = 1; i <= b.length; i++) {
+for (let j = 1; j <= a.length; j++) {
+if (b.charAt(i - 1) === a.charAt(j - 1)) {
+matriz[i][j] = matriz[i - 1][j - 1];
+} else {
+matriz[i][j] = Math.min(
+matriz[i - 1][j - 1] + 1,
+matriz[i][j - 1] + 1,
+matriz[i - 1][j] + 1
+);
+}
+}
+}
+
+return matriz[b.length][a.length];
+}
+
+let tiempoBusqueda;
+
+document.getElementById("buscarProducto").addEventListener("input", function(){
+
+clearTimeout(tiempoBusqueda);
+
+let valor = this.value;
+
+tiempoBusqueda = setTimeout(() => {
+renderizarInventario(valor);
+}, 200);
+
+});
+/* ================= ASISTENTE IA ================= */
+const CHATGPT_INVENTARIO_URL = "http://localhost:3001/chat-inventario";
+let accionIAPendiente = null;
+let accionIAProcesando = false;
+
+function agregarMensajeChat(texto, tipo){
+let chat = document.getElementById("chatMensajes");
+let div = document.createElement("div");
+div.className = "chat-msg " + (tipo === "usuario" ? "chat-user" : "chat-ai");
+div.textContent = texto;
+chat.appendChild(div);
+chat.scrollTop = chat.scrollHeight;
+}
+
+
+function hablar(texto){
+
+if (!window.speechSynthesis) return;
+
+window.speechSynthesis.cancel();
+
+let voz = new SpeechSynthesisUtterance(texto);
+
+voz.lang = "es-ES";
+voz.rate = 1;
+voz.pitch = 1;
+
+speechSynthesis.speak(voz);
+
+}
+
+let escuchandoContinuamente = false;
+let reconocimientoContinuo = null;
+
+function iniciarModoSiri(){
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (!SpeechRecognition) {
+alert("Tu navegador no soporta reconocimiento de voz.");
+return;
+}
+
+if(reconocimientoContinuo){
+reconocimientoContinuo.stop();
+}
+
+reconocimientoContinuo = new SpeechRecognition();
+
+reconocimientoContinuo.lang = "es-ES";
+reconocimientoContinuo.continuous = true;
+reconocimientoContinuo.interimResults = false;
+
+escuchandoContinuamente = true;
+
+agregarMensajeChat("Modo voz activado. Di: Hola Veracruz", "ia");
+
+reconocimientoContinuo.onresult = async function(event){
+
+let texto = event.results[event.results.length - 1][0].transcript;
+
+agregarMensajeChat("Escuchado: " + texto, "usuario");
+
+let limpio = normalizarTexto(texto);
+
+if(limpio.includes("hola veracruz")){
+
+hablar("Te escucho");
+
+return;
+
+}
+
+document.getElementById("ordenIA").value = texto;
+
+await enviarOrdenIA();
+
+};
+
+reconocimientoContinuo.onerror = function(event){
+console.error(event);
+};
+
+reconocimientoContinuo.start();
+
+}
+
+function detenerModoSiri(){
+
+if(reconocimientoContinuo){
+reconocimientoContinuo.stop();
+}
+
+escuchandoContinuamente = false;
+
+agregarMensajeChat("Modo voz desactivado", "ia");
+
+}
+
+
+async function enviarOrdenIA(){
+let input = document.getElementById("ordenIA");
+let orden = input.value.trim();
+
+if (!orden) return;
+
+agregarMensajeChat(orden, "usuario");
+input.value = "";
+agregarMensajeChat("Analizando la orden con IA...", "ia"); hablar("Analizando la orden");
+
+try {
+let resultado;
+if (CHATGPT_INVENTARIO_URL) {
+try {
+resultado = await consultarChatGPTInventario(orden);
+} catch (errorBackend) {
+console.error("No se pudo conectar al backend:", errorBackend);
+resultado = interpretarOrdenBasica(orden);
+resultado.respuesta += " No pude conectar con el backend local. Abre iniciar-backend.bat y vuelve a intentar para usar ChatGPT real.";
+}
+} else {
+resultado = interpretarOrdenBasica(orden);
+resultado.respuesta += " Para usar ChatGPT real, inicia el backend local.";
+}
+
+if (resultado.accion) {
+mostrarConfirmacionIA(resultado.accion, resultado.respuesta);
+} else {
+agregarMensajeChat(resultado.respuesta || "No encontré una acción de inventario en esa orden.", "ia"); hablar(resultado.respuesta || "No encontré una acción de inventario en esa orden.");
+}
+
+} catch (error) {
+console.error("Error en asistente IA:", error);
+agregarMensajeChat("No pude procesar la orden: " + error.message, "ia");
+}
+}
+
+function escucharOrdenIA(){
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (!SpeechRecognition) {
+alert("Tu navegador no soporta reconocimiento de voz. Prueba con Google Chrome o Edge.");
+return;
+}
+
+let reconocimiento = new SpeechRecognition();
+reconocimiento.lang = "es-ES";
+reconocimiento.interimResults = false;
+reconocimiento.maxAlternatives = 1;
+
+agregarMensajeChat("Escuchando...", "ia");
+reconocimiento.start();
+
+reconocimiento.onresult = function(event){
+let texto = event.results[0][0].transcript;
+document.getElementById("ordenIA").value = texto;
+agregarMensajeChat("Texto reconocido: " + texto, "ia");
+enviarOrdenIA();
+};
+
+reconocimiento.onerror = function(event){
+agregarMensajeChat("No pude reconocer el audio: " + event.error, "ia");
+};
+}
+async function consultarChatGPTInventario(orden){
+let respuesta = await fetch(CHATGPT_INVENTARIO_URL, {
+method: "POST",
+headers: { "Content-Type": "application/json" },
+body: JSON.stringify({
+orden: orden,
+productos: inventarioProductos.map(item => ({
+id: item.id,
+producto: item.producto,
+codigo: item.codigo,
+categoria: item.categoria,
+stock: item.stock
+}))
+})
+});
+
+if (!respuesta.ok) {
+throw new Error("El backend respondió con error " + respuesta.status);
+}
+
+return await respuesta.json();
+}
+
+function interpretarOrdenBasica(orden){
+let texto = normalizarTexto(orden);
+let tipo = "";
+
+if (texto.includes("entrada") || texto.includes("agrega") || texto.includes("sumar") || texto.includes("suma") || texto.includes("ingresa")) {
+tipo = "entrada";
+}
+
+if (texto.includes("salida") || texto.includes("saca") || texto.includes("resta") || texto.includes("descuenta") || texto.includes("vende")) {
+tipo = "salida";
+}
+
+let cantidadEncontrada = texto.match(/\d+/);
+let cantidad = cantidadEncontrada ? parseInt(cantidadEncontrada[0]) : 0;
+let producto = buscarProductoEnOrden(texto);
+
+if (!tipo || !cantidad || !producto) {
+return {
+respuesta: "No entendí completamente. Prueba con algo como: agrega 5 unidades de aceite motor.",
+accion: null
+};
+}
+
+return {
+respuesta: "Entendí una " + tipo + " de " + cantidad + " unidad(es) para " + producto.producto + ".",
+accion: {
+tipo: tipo,
+cantidad: cantidad,
+productoId: producto.id,
+producto: producto.producto
+}
+};
+}
+
+function buscarProductoEnOrden(texto){
+let mejorProducto = null;
+let mejorPuntaje = -1;
+
+inventarioProductos.forEach(item => {
+let nombre = normalizarTexto(item.producto);
+let codigo = normalizarTexto(item.codigo);
+let categoria = normalizarTexto(item.categoria);
+let puntaje = 0;
+
+if (texto.includes(nombre)) puntaje += 100;
+if (codigo && texto.includes(codigo)) puntaje += 80;
+
+nombre.split(" ").forEach(palabra => {
+if (palabra.length > 2 && texto.includes(palabra)) puntaje += 10;
+});
+
+categoria.split(" ").forEach(palabra => {
+if (palabra.length > 2 && texto.includes(palabra)) puntaje += 3;
+});
+
+if (puntaje > mejorPuntaje) {
+mejorPuntaje = puntaje;
+mejorProducto = item;
+}
+});
+
+return mejorPuntaje > 0 ? mejorProducto : null;
+}
+
+function mostrarConfirmacionIA(accion, respuesta){
+accionIAPendiente = accion;
+accionIAProcesando = false;
+document.getElementById("btnConfirmarIA").disabled = false;
+agregarMensajeChat(respuesta, "ia");
+
+document.getElementById("textoConfirmacionIA").innerHTML =
+"Confirmar " + accion.tipo + " de " + accion.cantidad + " unidad(es) para: <b>" + accion.producto + "</b>";
+
+document.getElementById("confirmacionIA").style.display = "block";
+}
+
+async function confirmarAccionIA(){
+if (!accionIAPendiente || accionIAProcesando) return;
+
+accionIAProcesando = true;
+document.getElementById("btnConfirmarIA").disabled = true;
+
+let accion = accionIAPendiente;
+accionIAPendiente = null;
+
+document.getElementById("producto").value = accion.productoId;
+document.getElementById("cantidad").value = accion.cantidad;
+
+try {
+if (accion.tipo === "entrada") await window.entrada();
+if (accion.tipo === "salida") await window.salida();
+
+agregarMensajeChat("Acción aplicada correctamente.", "ia"); hablar("Acción aplicada correctamente");
+document.getElementById("confirmacionIA").style.display = "none";
+} catch (error) {
+console.error("Error al aplicar acción IA:", error);
+agregarMensajeChat("No pude aplicar la acción: " + error.message, "ia");
+accionIAPendiente = accion;
+document.getElementById("btnConfirmarIA").disabled = false;
+} finally {
+accionIAProcesando = false;
+}
+}
+
+function cancelarAccionIA(){
+accionIAPendiente = null;
+accionIAProcesando = false;
+document.getElementById("btnConfirmarIA").disabled = false;
+document.getElementById("confirmacionIA").style.display = "none";
+agregarMensajeChat("Acción cancelada.", "ia");
+}
+
+document.getElementById("btnEnviarIA").addEventListener("click", enviarOrdenIA);
+document.getElementById("btnVozIA").addEventListener("click", escucharOrdenIA);
+document.getElementById("btnModoSiri").addEventListener("click", iniciarModoSiri);
+document.getElementById("btnDetenerSiri").addEventListener("click", detenerModoSiri);
+document.getElementById("ordenIA").addEventListener("keydown", function(event){
+if (event.key === "Enter") enviarOrdenIA();
+});
+document.getElementById("btnConfirmarIA").addEventListener("click", confirmarAccionIA);
+document.getElementById("btnCancelarIA").addEventListener("click", cancelarAccionIA);
+let movimientoEnProceso = false;
+/* ================= ENTRADA ================= */
+window.entrada = async function(){
+
+if (movimientoEnProceso) return;
+movimientoEnProceso = true;
+
+let id = document.getElementById("producto").value;
+let c = parseInt(document.getElementById("cantidad").value);
+
+if(!c || c <= 0) {
+movimientoEnProceso = false;
+return;
+}
+
+const snap = await getDocs(collection(db,"inventario"));
+
+for(let d of snap.docs){
+
+if(d.id == id){
+
+let data = d.data();
+
+await updateDoc(doc(db,"inventario",id),{
+stock: data.stock + c
+});
+
+await addDoc(collection(db,"movimientos"),{
+producto: data.producto,
+productoId: id,
+tipo: "entrada",
+cantidad: c,
+usuario: window.usuarioActual,
+fecha: Timestamp.now()
+});
+
+mostrar();
+movimientoEnProceso = false;
+return;
+
+}
+
+}
+
+movimientoEnProceso = false;
+}
+
+/* ================= SALIDA ================= */
+window.salida = async function(){
+
+if (movimientoEnProceso) return;
+movimientoEnProceso = true;
+
+let id = document.getElementById("producto").value;
+let c = parseInt(document.getElementById("cantidad").value);
+
+if(!c || c <= 0) {
+movimientoEnProceso = false;
+return;
+}
+
+const snap = await getDocs(collection(db,"inventario"));
+
+for(let d of snap.docs){
+
+if(d.id == id){
+
+let data = d.data();
+
+if(data.stock < c){
+alert("Stock insuficiente");
+movimientoEnProceso = false;
+return;
+}
+
+await updateDoc(doc(db,"inventario",id),{
+stock: data.stock - c
+});
+
+await addDoc(collection(db,"movimientos"),{
+producto: data.producto,
+productoId: id,
+tipo: "salida",
+cantidad: c,
+usuario: window.usuarioActual,
+fecha: Timestamp.now()
+});
+
+mostrar();
+movimientoEnProceso = false;
+return;
+
+}
+
+}
+
+movimientoEnProceso = false;
+}
+
+/* ================= EXCEL ================= */
+window.exportarExcel = async function(){
+
+const snap = await getDocs(collection(db,"inventario"));
+
+let data = [];
+
+snap.forEach(d => {
+let i = d.data();
+data.push({
+Categoria: i.categoria,
+Codigo: i.codigo,
+Producto: i.producto,
+Stock: i.stock
+});
+});
+
+const ws = XLSX.utils.json_to_sheet(data);
+const wb = XLSX.utils.book_new();
+
+XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+
+XLSX.writeFile(wb, "Inventario_Veracruz.xlsx");
+
+}
+
+/* ================= SALIR ================= */
+window.salir = function(){
+location.reload();
+}
+
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
