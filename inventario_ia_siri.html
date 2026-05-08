@@ -517,7 +517,7 @@ renderizarInventario(valor);
 
 });
 /* ================= ASISTENTE IA ================= */
-const CHATGPT_INVENTARIO_URL = "http://localhost:3001/chat-inventario";
+const CHATGPT_INVENTARIO_URL = "https://inventarios-ia-veracruz.onrender.com/chat-inventario";
 let accionIAPendiente = null;
 let accionIAProcesando = false;
 
@@ -634,11 +634,11 @@ resultado = await consultarChatGPTInventario(orden);
 } catch (errorBackend) {
 console.error("No se pudo conectar al backend:", errorBackend);
 resultado = interpretarOrdenBasica(orden);
-resultado.respuesta += " No pude conectar con el backend local. Abre iniciar-backend.bat y vuelve a intentar para usar ChatGPT real.";
+resultado.respuesta += " "No pude conectar con el servidor IA."";
 }
 } else {
 resultado = interpretarOrdenBasica(orden);
-resultado.respuesta += " Para usar ChatGPT real, inicia el backend local.";
+
 }
 
 if (resultado.accion) {
